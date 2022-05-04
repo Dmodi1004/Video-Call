@@ -1,0 +1,18 @@
+package com.example.videocall;
+
+import android.webkit.JavascriptInterface;
+
+public class interfaceJava {
+
+    CallActivity callActivity;
+
+    public interfaceJava(CallActivity callActivity) {
+        this.callActivity = callActivity;
+    }
+
+    @JavascriptInterface
+    public void onPeerConnected(){
+        callActivity.onPeerConnected();
+    }
+
+}
