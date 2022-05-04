@@ -1,0 +1,190 @@
+package com.example.videocall;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.view.View;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Toast;
+
+import com.example.videocall.databinding.ActivityCallBinding;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
+
+import java.util.UUID;
+
+public class CallActivity extends AppCompatActivity {
+
+    ActivityCallBinding binding;
+    String uniqueId = "";
+    FirebaseAuth auth;
+    String username = "";
+    String frdUsername = "";
+    boolean isPeerConnected = false;
+    DatabaseReference reference;
+
+    boolean isAudio = true;
+    boolean isVideo = true;
+    String createdBy;
+    boolean pageExit = false;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        binding = ActivityCallBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
+
+        auth = FirebaseAuth.getInstance();
+        reference = FirebaseDatabase.getInstance().getReference().child("room");
+
+        username = getIntent().getStringExtra("userName");
+        String incoming = getIntent().getStringExtra("incoming");
+        createdBy = getIntent().getStringExtra("createdBy");
+
+        frdUsername = "";
+        if (incoming.equalsIgnoreCase(frdUsername)) {
+            frdUsername = incoming;
+        }
+        setupWebView();
+        binding.micBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                isAudio = !isAudio;
+                callJavaScriptFunc("javascript:toggleAudio(\"" + isAudio + "\")");
+                if (isAudio) {
+                    binding.micBtn.setImageResource(R.drawable.ic_unmute_call);
+                } else {
+                    binding.micBtn.setImageResource(R.drawable.ic_mute_call);
+                }
+            }
+        });
+        binding.videoBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                isVideo = !isVideo;
+                callJavaScriptFunc("javascript:toggleVideo(\"" + isVideo + "\")");
+                if (isVideo) {
+                    binding.videoBtn.setImageResource(R.drawable.ic_video);
+                } else {
+                    binding.videoBtn.setImageResource(R.drawable.ic_mute_video);
+                }
+            }
+        });
+    }
+
+    void setupWebView() {
+        binding.webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    request.grant(request.getResources());
+                }
+            }
+        });
+        binding.webView.getSettings().setJavaScriptEnabled(true);
+        binding.webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
+        binding.webView.addJavascriptInterface(new interfaceJava(this), "Android");
+        loadVideoCall();
+    }
+
+    public void loadVideoCall() {
+        String filePath = "file:android_asset/call.html";
+        binding.webView.loadUrl(filePath);
+        binding.webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                initializePeer();
+            }
+        });
+    }
+
+    void initializePeer() {
+        uniqueId = getUniqueId();
+        callJavaScriptFunc("javascript:init(\"" + uniqueId + "\")");
+
+        if (createdBy.equalsIgnoreCase(username)) {
+            reference.child(username).child("connId").setValue(uniqueId);
+            reference.child("room").child("isAvailable").setValue(true);
+            binding.controls.setVisibility(View.VISIBLE);
+        } else {
+            new Handler().postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    frdUsername = createdBy;
+                    FirebaseDatabase.getInstance()
+                            .getReference()
+                            .child("users")
+                            .child(frdUsername)
+                            .child("connId")
+                            .addListenerForSingleValueEvent(new ValueEventListener() {
+                                @Override
+                                public void onDataChange(@NonNull DataSnapshot snapshot) {
+                                    if (snapshot.getValue() != null) {
+                                        sendCallRequest();
+                                    }
+                                }
+
+                                @Override
+                                public void onCancelled(@NonNull DatabaseError error) {
+                                }
+                            });
+                }
+            }, 5000);
+        }
+    }
+
+    public void onPeerConnected() {
+        isPeerConnected = true;
+    }
+
+    void sendCallRequest() {
+        if (!isPeerConnected) {
+            Toast.makeText(this, "You are not connected, Please check your Internet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        listenConnectionInd();
+    }
+
+    void listenConnectionInd() {
+        reference.child(frdUsername).child("connId").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                if (snapshot.getValue() == null) {
+                    return;
+                }
+                binding.controls.setVisibility(View.VISIBLE);
+                String connId = snapshot.getValue(String.class);
+                callJavaScriptFunc("javascript:startCall(\"" + connId + "\")");
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+            }
+        });
+    }
+
+    void callJavaScriptFunc(String function) {
+        binding.webView.post(new Runnable() {
+            @Override
+            public void run() {
+                binding.webView.evaluateJavascript(function, null);
+            }
+        });
+    }
+
+    String getUniqueId() {
+        return UUID.randomUUID().toString();
+    }
+}
